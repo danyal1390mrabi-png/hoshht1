@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>چت</title>
+<style>
+  :root{--bg:#0f172a;--panel:#1e293b;--me:#2563eb;--other:#334155;--text:#e2e8f0;--muted:#94a3b8}
+  *{box-sizing:border-box;margin:0}
+  html,body{height:100%}
+  body{font-family:Tahoma,Vazirmatn,sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column}
+  header{padding:14px 16px;background:var(--panel);display:flex;justify-content:space-between;align-items:center;font-weight:bold}
+  header small{color:var(--muted);font-weight:normal;cursor:pointer}
+  #msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
+  .m{max-width:78%;padding:8px 12px;border-radius:14px;background:var(--other);word-break:break-word;line-height:1.7}
+  .m.me{align-self:flex-start;background:var(--me)}
+  .m b{display:block;font-size:12px;color:var(--muted)}
+  .m.me b{color:#bfdbfe}
+  .m time{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+  form{display:flex;gap:8px;padding:10px;background:var(--panel);padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+  input{flex:1;padding:12px;border-radius:10px;border:0;background:var(--bg);color:var(--text);font:inherit}
+  button{padding:0 18px;border:0;border-radius:10px;background:var(--me);color:#fff;font:inherit;cursor:pointer}
+  #err{color:#fca5a5;padding:6px 14px;font-size:13px;display:none}
+</style>
+</head>
+<body>
+<header><span>💬 چت کلاس هوش مصنوعی</span><small id="rename">تغییر نام</small></header>
+<div id="err"></div>
+<div id="msgs"></div>
+<form id="f"><input id="t" placeholder="پیام بنویس..." autocomplete="off"><button>ارسال</button></form>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// ===== تنظیمات: این دو مقدار را از Supabase > Project Settings > API بردارید =====
+const SUPABASE_URL = "https://cmrntvchgbgfkzgqzsxz.supabase.co";      // مثال: https://xxxx.supabase.co
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNtcm50dmNoZ2JnZmt6Z3F6c3h6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk1ODQ3ODgsImV4cCI6MjEwNTE2MDc4OH0.fYrvVCwHDf4RgEBRyUqurNuKOIlDth4y1ufUb3TvVaw";      // anon public key
+const TABLE = "chat_page_messages";
+
+const $ = id => document.getElementById(id);
+const err = m => { $("err").textContent = m; $("err").style.display = m ? "block" : "none"; };
+
+let name = localStorage.getItem("chat_name");
+function askName(){
+  name = (prompt("اسمت چیه؟", name || "") || "").trim() || name || "ناشناس";
+  localStorage.setItem("chat_name", name);
+}
+if(!name) askName();
+$("rename").onclick = askName;
+
+if(!SUPABASE_URL || !SUPABASE_KEY){
+  err("ابتدا SUPABASE_URL و SUPABASE_KEY را در بالای کد اسکریپت وارد کنید.");
+} else {
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const seen = new Set();
+
+  function add(m){
+    if(seen.has(m.id)) return;
+    seen.add(m.id);
+    const d = document.createElement("div");
+    d.className = "m" + (m.username === name ? " me" : "");
+    const b = document.createElement("b"); b.textContent = m.username;
+    const p = document.createElement("span"); p.textContent = m.content;
+    const t = document.createElement("time");
+    t.textContent = new Date(m.created_at).toLocaleTimeString("fa-IR",{hour:"2-digit",minute:"2-digit"});
+    d.append(b,p,t);
+    const box = $("msgs");
+    const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+    box.appendChild(d);
+    if(atEnd) box.scrollTop = box.scrollHeight;
+  }
+
+  (async () => {
+    const { data, error } = await db.from(TABLE).select("*").order("created_at",{ascending:false}).limit(100);
+    if(error) return err("خطا در بارگذاری: " + error.message);
+    data.reverse().forEach(add);
+    $("msgs").scrollTop = $("msgs").scrollHeight;
+    db.channel("chat-page")
+      .on("postgres_changes",{event:"INSERT",schema:"public",table:TABLE},p => add(p.new))
+      .subscribe();
+  })();
+
+  $("f").onsubmit = async e => {
+    e.preventDefault();
+    const content = $("t").value.trim();
+    if(!content) return;
+    $("t").value = "";
+    const { error } = await db.from(TABLE).insert({ username: name, content });
+    if(error) err("ارسال نشد: " + error.message); else err("");
+  };
+}
+</script>
+</body>
+</html>
